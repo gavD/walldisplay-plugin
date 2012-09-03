@@ -390,6 +390,18 @@
 							// build screen doesn't fill up with builds.
 							if(job.color === "blue") {
 
+                                                            // sOf Box UK specific code
+                                                            if(job.name.indexOf('db-') === 0
+                                                                || job.name.indexOf('amaxus4-documentation') === 0
+                                                                || job.name.indexOf('boxuk-coding-standards') === 0
+                                                                || job.name.indexOf('boxuk-coding-standards') === 0
+                                                                ) {
+                                                                add = false;
+                                                                jobFilteredOut = true;
+                                                            }
+                                                            // eof Box UK specific code
+
+
 								var timestamp = new Date().getTime();
 								var ONE_DAY_MS = 86400000;
 								var minTimestamp = 0;
