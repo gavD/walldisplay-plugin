@@ -1,4 +1,4 @@
-/*global debug, getParameterByName, getJobText, getJobTitle, isNumber, removeMessage, getUserFriendlyTimespan, getLongestJob, setApiInterval */
+/*global getGravatarUrl, debug, getParameterByName, getJobText, getJobTitle, isNumber, removeMessage, getUserFriendlyTimespan, getLongestJob, setApiInterval */
 
 var maxQueuePositionToShow = 15;
 
@@ -31,6 +31,9 @@ var viewName = getParameterByName("viewName", "All");
 var theme = getParameterByName("theme", "default");
 var buildRange = getParameterByName("buildRange", "all");
 var showDetails = false;
+var showGravatar = false;
+var jobGravatarCache = {};
+var gravatarCounter = {};
 var showBuildNumber = true;
 var showDisabledBuilds = true;
 
@@ -487,6 +490,22 @@ function repaint()
 
 						var queueDivs = getQueueDivs(jobWidth, jobHeight, getBuildQueuePosition(job.name));
 
+                        //- create the gravatar img ------------------------
+                        if(!jobGravatarCache[job.name] || gravatarCounter[job.name] >= 5) {
+                           var jobGravatar = $('<img />');
+                           jobGravatar.attr('src', getGravatarUrl(job, showGravatar, Math.round(jobDimensions.height * 0.80)));
+                           jobGravatar.css({
+                                 "float": "left",
+                                 "padding-top": Math.round((jobDimensions.height * 0.50) - (Math.round(jobDimensions.height * 0.40))),
+                                 "padding-left": "5%" 
+                           });
+
+                           jobGravatarCache[job.name] = jobGravatar;
+                           gravatarCounter[job.name] = 0;
+                        } else {
+                           gravatarCounter[job.name] = parseInt(gravatarCounter[job.name], 10) + 1;
+                        }
+
 						//- create the job content div ---------------------
 						var jobContent = $('<div />');
 						jobContent.css({
@@ -561,7 +580,7 @@ function getJobs(jobNames)
 				url: jenkinsUrl +  "/job/" + jobName + "/api/json",
 				dataType: "json",
 				data: {
-					"tree": "property[wallDisplayName],name,color,lastBuild[number,timestamp,duration,actions[claimed,claimedBy,failCount,skipCount,totalCount],culprits[fullName]],lastSuccessfulBuild[duration]"
+					"tree": "property[wallDisplayName],name,color,lastBuild[number,timestamp,duration,actions[claimed,claimedBy,failCount,skipCount,totalCount],culprits[fullName,property[address]]],lastSuccessfulBuild[duration]"
 				},
 				success: function(job, textStatus, jqXHR) {
 					debug("finished getting api for job '" + jobName + "'");
