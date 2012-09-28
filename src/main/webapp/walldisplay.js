@@ -610,6 +610,18 @@ function getJobs(jobNames)
 							add = false;
 							jobFilteredOut = true;
 						}
+
+                        // sOf Box UK specific code
+                        if(
+                            (job.name.indexOf('db-') === 0)
+                            || (job.name.indexOf('amaxus4-documentation') === 0)
+                            || (job.name.indexOf('-coverage') > 0)
+                        )
+                        {
+                            add = false;
+                            jobFilteredOut = true;
+                        }
+                        // eOf Box UK specific code
 					}
 
 
