@@ -1,6 +1,129 @@
+/*global debug, getParameterByName, getJobText, getJobTitle, isNumber, removeMessage, getUserFriendlyTimespan, getLongestJob, setApiInterval */
+
+var maxQueuePositionToShow = 15;
+
+var clientWidth;
+var clientHeight;
+
+var rows = 0;
+var columns = 0;
+var jobIndex = 0;
+var jobsToDisplay = [];
+var serverTime = 0;
+var updateRunning = [];
+var updateError = null;
+var lastPluginVersion = null;
+var lastTheme = "default";
+var fontFamily = getParameterByName("fontFamily", "sans-serif");
+var lastFontFamily = fontFamily;
+var paintRunning = false;
+
+//- initialize variables ----------------------------------------------
+var jenkinsTimeOut = getParameterByName("jenkinsTimeOut", 15000);
+var lastJenkinsTimeOut = jenkinsTimeOut;
+var jenkinsApiIntervalId = null;
+
+var jenkinsUpdateInterval = getParameterByName("jenkinsUpdateInterval", 20000);
+var lastJenkinsUpdateInterval = jenkinsUpdateInterval;
+
+var jenkinsUrl = getParameterByName("jenkinsUrl",  window.location.protocol + "://" + window.location.host + "/" + window.location.pathname.replace("plugin/jenkinswalldisplay/walldisplay.html", ""));
+var viewName = getParameterByName("viewName", "All");
+var theme = getParameterByName("theme", "default");
+var buildRange = getParameterByName("buildRange", "all");
+var showDetails = false;
+var showBuildNumber = true;
+var showDisabledBuilds = true;
+
+var jobPadding = 5;
+var jobMargin = 8;
+var jobBorderWidth = 0;
+var paintInterval = 1000;
+var jobInfoTimout = 5000;
+
+var isDebug = false;
+var debugString = getParameterByName("debug", null);
+if (debugString != null)
+{
+	isDebug  = true;
+}
+
+
+//---------------------------------------------------------------------
+// themes
+//---------------------------------------------------------------------
+var themes = [];
+themes["default"] = [];
+themes["default"].backgroundColor = "#ffffff";
+themes["default"]["blue"] = "#008800";
+themes["default"]["blue_building"] = "#00C000";
+themes["default"]["red"] = "#880000";
+themes["default"]["red_building"] = "#C00000";
+themes["default"]["yellow"] = "#888800";
+themes["default"]["yellow_building"] = "#C0C000";
+themes["default"]["aborted"] = "#ADADAD";
+themes["default"]["aborted_building"] = "#E8E6E6";
+themes["default"]["claimed_border"] = "#F5B800";
+
+
+themes["colorblind"] = [];
+themes["colorblind"].backgroundColor = "#ffffff";
+themes["colorblind"]["blue"] = "#0041C4";
+themes["colorblind"]["blue_building"] = "#BFD4FF";
+themes["colorblind"]["red"] = "#B30700";
+themes["colorblind"]["red_building"] = "#FF9180";
+themes["colorblind"]["yellow"] = "#B3B000";
+themes["colorblind"]["yellow_building"] = "#FFF780";
+themes["colorblind"]["aborted"] = "#777777";
+themes["colorblind"]["aborted_building"] = "#EEEEEE";
+themes["colorblind"]["claimed_border"] = "#F5B800";
+
+themes["dark"] = [];
+themes["dark"].backgroundColor = "#000000";
+themes["dark"]["blue"] = "#008800";
+themes["dark"]["blue_building"] = "#00C000";
+themes["dark"]["red"] = "#880000";
+themes["dark"]["red_building"] = "#C00000";
+themes["dark"]["yellow"] = "#888800";
+themes["dark"]["yellow_building"] = "#C0C000";
+themes["dark"]["aborted"] = "#ADADAD";
+themes["dark"]["aborted_building"] = "#E8E6E6";
+themes["dark"]["claimed_border"] = "#F5B800";
+
+themes["christmas"] = [];
+themes["christmas"].backgroundColor = "#000000";
+themes["christmas"]["blue"] = "#008800";
+themes["christmas"]["blue_building"] = "#00C000";
+themes["christmas"]["red"] = "#880000";
+themes["christmas"]["red_building"] = "#C00000";
+themes["christmas"]["yellow"] = "#888800";
+themes["christmas"]["yellow_building"] = "#C0C000";
+themes["christmas"]["aborted"] = "#ADADAD";
+themes["christmas"]["aborted_building"] = "#E8E6E6";
+themes["christmas"]["claimed_border"] = "#F5B800";
+themes["christmas"].start = function() {
+	$(document).snowfall('clear');
+	$(document).snowfall({round : true, minSize: 8, maxSize: 12 }); // add rounded
+};
+themes["christmas"].stop = function() {
+	$(document).snowfall('clear');
+};
+
+themes["boss"] = [];
+themes["boss"].backgroundColor = "#ffffff";
+themes["boss"]["blue"] = "#008800";
+themes["boss"]["blue_building"] = "#00C000";
+themes["boss"]["red"] = "#008800";
+themes["boss"]["red_building"] = "#00C000";
+themes["boss"]["yellow"] = "#008800";
+themes["boss"]["yellow_building"] = "#00C000";
+themes["boss"]["aborted"] = "#ADADAD";
+themes["boss"]["aborted_building"] = "#E8E6E6";
+
+var buildQueue = null;
+
 function getQueueDivs(jobWidth, jobHeight, queuePosition)
 {
-	var queueDivs = new Array();
+	var queueDivs = [];
 
 	var maxPerColumn = 3;
 	var perColumn = queuePosition;
@@ -22,11 +145,11 @@ function getQueueDivs(jobWidth, jobHeight, queuePosition)
 
 	var queueLeft = jobWidth - 2 * radius;
 
-	for(queueColumn=0; queueColumn < queueColumns; queueColumn++)
+	for(var queueColumn=0; queueColumn < queueColumns; queueColumn++)
 	{
 		var queueTop = increment;
 
-		for (i=0; i < perColumn; i++)
+		for (var i=0; i < perColumn; i++)
 		{
 			if (queueDivs.length < queuePosition)
 			{
@@ -67,7 +190,7 @@ function updateWindowSizes()
 	debug("clientHeight: " + clientHeight + ", clientWidth: " + clientWidth);
 }
 
-var cachedTextDimensions = new Array();
+var cachedTextDimensions = [];
 function getTextDimensions(text, fontSize) {
 
 	var cacheKey = text + fontSize;
@@ -99,6 +222,12 @@ function getJobDimensions(job, fontSize) {
 
 }
 
+
+function removeAllJobs()
+{
+	$(".job").remove();
+}
+
 function displayMessage(messageText, colorClass)
 {
 	removeAllJobs();
@@ -106,7 +235,7 @@ function displayMessage(messageText, colorClass)
 	//height:' + (clientHeight - 4 * messageMargin) + '; width:' + (clientWidth - 4 * messageMargin) + ';'
 	var messageMargin = 50;
 	var positionStyle = 'position: absolute; padding: ' + messageMargin + 'px; left: ' + messageMargin + 'px; top: ' + messageMargin + 'px; width:' + (clientWidth - 4 * messageMargin) + ';';
-	var divContent = '<div class="' + colorClass + '" style="' + positionStyle + '" id="Message">' + messageText + '</div>'
+	var divContent = '<div class="' + colorClass + '" style="' + positionStyle + '" id="Message">' + messageText + '</div>';
 
 
 	if ($("#Message").length)
@@ -119,6 +248,112 @@ function displayMessage(messageText, colorClass)
 	}
 }
 
+function showJobinfo(job)
+{
+	if (!$("#JobInfo").length)
+	{
+		var jobInfoPadding = 10;
+		var maxFontSize = 0;
+		var jobInfoWidth = Math.ceil(clientWidth / 2);
+		var jobInfoHeight = Math.ceil(clientHeight / 2);
+
+		for (var fontSize = 10; fontSize <= 302; fontSize++) {
+
+			var textDimensions = getTextDimensions(getJobText(job, showBuildNumber, showDetails), fontSize);
+
+			if (textDimensions.width <= (jobInfoWidth - jobInfoPadding) && textDimensions.height <= (jobInfoHeight - jobInfoPadding))
+			{
+				if (fontSize > maxFontSize)
+				{
+					maxFontSize = fontSize;
+				}
+			}
+			else
+			{
+				break;
+			}
+		}
+
+
+		var jobInfoDiv = $('<div />').attr({
+			"id": "JobInfo"
+		});
+		jobInfoDiv.css({
+			"height": jobInfoHeight + "px",
+			"width": jobInfoWidth + "px",
+			"padding": jobInfoPadding + "px"
+		});
+		jobInfoDiv.addClass("job_info");
+		jobInfoDiv.center();
+
+		var jobInfoTitle = $('<span />');
+		jobInfoTitle.css({
+			"font-size": maxFontSize + "px"
+		});
+		jobInfoTitle.text(getJobTitle(job));
+		jobInfoDiv.append(jobInfoTitle);
+
+		var lastBuildText = "";
+		if (job.lastBuild != null)
+		{
+			lastBuildText += "Last build started " + getUserFriendlyTimespan(serverTime -job.lastBuild.timestamp) + " ago and  took " + getUserFriendlyTimespan(job.lastBuild.duration);
+		}
+		jobInfoDiv.append("<br/><br/>");
+
+		var jobLastBuild = $('<span />');
+		jobLastBuild.css({
+			"font-size": 12 + "px"
+		});
+		jobLastBuild.text(lastBuildText);
+		jobInfoDiv.append(jobLastBuild);
+
+
+		$("body").append(jobInfoDiv);
+
+		/*
+		jobInfoDiv.fadeTo(1500, 0.95, function() {
+
+			setInterval(function() {
+				jobInfoDiv.fadeTo(1500, 0.0, function() {
+					$("#JobInfo").remove();
+				}
+				);
+			}, jobInfoTimout);
+		});
+		*/
+	}
+}
+function isBuildClaimed(actions)
+{
+	var claimed = false;
+
+	$.each(actions, function(actionIndex, action) {
+
+		if (action.claimed)
+		{
+			claimed =  true;
+		}
+	});
+
+	return claimed;
+}
+
+function getBuildQueuePosition(jobName)
+{
+	var queuePosition = 0;
+
+	if (buildQueue != null)
+	{
+		$.each(buildQueue["items"], function(index, queueItem) {
+
+			if (queueItem != null && queueItem.task != null && queueItem.task.name != null && queueItem.task.name == jobName)
+			{
+				queuePosition = index + 1;
+			}
+		});
+	}
+	return queuePosition;
+}
 
 function repaint()
 {
@@ -154,10 +389,10 @@ function repaint()
 
 					var rowCount = Math.ceil(jobsToDisplay.length /  columnCount);
 
-					var jobDimensions = getJobDimensions(longestJob, fontSize);
+					var jobDimensionsWH = getJobDimensions(longestJob, fontSize);
 
-					var totalWidth = jobDimensions.width * columnCount + jobMargin * (columnCount-1);
-					var totalHeight = jobDimensions.height * rowCount + jobMargin * (rowCount-1);
+					var totalWidth = jobDimensionsWH.width * columnCount + jobMargin * (columnCount-1);
+					var totalHeight = jobDimensionsWH.height * rowCount + jobMargin * (rowCount-1);
 
 					if (totalWidth <= clientWidth && totalHeight <= clientHeight)
 					{
@@ -226,7 +461,7 @@ function repaint()
 						var jobDimensionsStyle = { "width": jobWidth - 2 * claimedBorderWidth, "height": jobHeight - 2 * claimedBorderWidth };
 						var jobPositionStyle = { "position": "absolute", "top": top, "left": left };
 
-						var percentageDiv = $('<div />');;
+						var percentageDiv = $('<div />');
 						var jobOverdue = false;
 						if (isBuilding && job.lastBuild != null && job.lastBuild.timestamp != null && job.lastSuccessfulBuild != null && job.lastSuccessfulBuild.duration != null)
 						{
@@ -307,25 +542,6 @@ function repaint()
 	}
 }
 
-function removeAllJobs()
-{
-	$(".job").remove();
-}
-
-function isBuildClaimed(actions)
-{
-	claimed = false;
-
-	$.each(actions, function(actionIndex, action) {
-
-		if (action.claimed)
-		{
-			claimed =  true;
-		}
-	});
-
-	return claimed;
-}
 
 function getJobs(jobNames)
 {
@@ -422,7 +638,7 @@ function getJobs(jobNames)
 
 function getJobNamesToDisplay(viewApi)
 {
-	var jobNames = new Array();;
+	var jobNames = [];
 
 	$.each(viewApi.jobs, function(index, job) {
 		jobNames.push(job.name);
@@ -462,81 +678,6 @@ function showDebug()
 	$("body").prepend(debugDiv);
 }
 
-function showJobinfo(job)
-{
-	if (!$("#JobInfo").length)
-	{
-		var jobInfoPadding = 10;
-		var maxFontSize = 0;
-		var jobInfoWidth = Math.ceil(clientWidth / 2);
-		var jobInfoHeight = Math.ceil(clientHeight / 2);
-
-		for (var fontSize = 10; fontSize <= 302; fontSize++) {
-
-			var textDimensions = getTextDimensions(getJobText(job, showBuildNumber, showDetails), fontSize);
-
-			if (textDimensions.width <= (jobInfoWidth - jobInfoPadding) && textDimensions.height <= (jobInfoHeight - jobInfoPadding))
-			{
-				if (fontSize > maxFontSize)
-				{
-					maxFontSize = fontSize;
-				}
-			}
-			else
-			{
-				break;
-			}
-		}
-
-
-		var jobInfoDiv = $('<div />').attr({
-			"id": "JobInfo"
-		});
-		jobInfoDiv.css({
-			"height": jobInfoHeight + "px",
-			"width": jobInfoWidth + "px",
-			"padding": jobInfoPadding + "px"
-		});
-		jobInfoDiv.addClass("job_info");
-		jobInfoDiv.center();
-
-		var jobInfoTitle = $('<span />');
-		jobInfoTitle.css({
-			"font-size": maxFontSize + "px"
-		});
-		jobInfoTitle.text(getJobTitle(job));
-		jobInfoDiv.append(jobInfoTitle);
-
-		var lastBuildText = "";
-		if (job.lastBuild != null)
-		{
-			lastBuildText += "Last build started " + getUserFriendlyTimespan(serverTime -job.lastBuild.timestamp) + " ago and  took " + getUserFriendlyTimespan(job.lastBuild.duration);
-		}
-		jobInfoDiv.append("<br/><br/>");
-
-		var jobLastBuild = $('<span />');
-		jobLastBuild.css({
-			"font-size": 12 + "px"
-		});
-		jobLastBuild.text(lastBuildText);
-		jobInfoDiv.append(jobLastBuild);
-
-
-		$("body").append(jobInfoDiv);
-
-		/*
-		jobInfoDiv.fadeTo(1500, 0.95, function() {
-
-			setInterval(function() {
-				jobInfoDiv.fadeTo(1500, 0.0, function() {
-					$("#JobInfo").remove();
-				}
-				);
-			}, jobInfoTimout);
-		});
-		*/
-	}
-}
 
 function getJenkinsApi(jenkinsUrl) {
 
@@ -567,30 +708,13 @@ function getJenkinsApi(jenkinsUrl) {
 			debug("error getting jenkins api: '" + e.statusText + "'");
 			updateRunning[viewName] = false;
 			updateError =  e.statusText;
-			jobsToDisplay = new Array();
+			jobsToDisplay = [];
 		},
 		timeout: jenkinsTimeOut
 	});
 }
 
-function getBuildQueuePosition(jobName)
-{
-	var queuePosition = 0;
 
-	if (buildQueue != null)
-	{
-		$.each(buildQueue["items"], function(index, queueItem) {
-
-			if (queueItem != null && queueItem.task != null && queueItem.task.name != null && queueItem.task.name == jobName)
-			{
-				queuePosition = index + 1;
-			}
-		});
-	}
-	return queuePosition;
-}
-
-var buildQueue = null;
 function getJenkinsQueue(jenkinsUrl) {
 
 	debug("starting getting queue api");
@@ -612,6 +736,11 @@ function getJenkinsQueue(jenkinsUrl) {
 		},
 		timeout: jenkinsTimeOut
 	});
+}
+
+function clearApiInterval()
+{
+	clearInterval(jenkinsApiIntervalId);
 }
 
 function getPluginConfiguration(jenkinsUrl) {
@@ -722,124 +851,35 @@ function getPluginConfiguration(jenkinsUrl) {
 		timeout: jenkinsTimeOut
 	});
 }
-//- initialize variables ----------------------------------------------
-var jenkinsTimeOut = getParameterByName("jenkinsTimeOut", 15000);
-var lastJenkinsTimeOut = jenkinsTimeOut;
 
-var jenkinsUpdateInterval = getParameterByName("jenkinsUpdateInterval", 20000);
-var lastJenkinsUpdateInterval = jenkinsUpdateInterval;
-
-var jenkinsUrl = getParameterByName("jenkinsUrl",  window.location.protocol + "://" + window.location.host + "/" + window.location.pathname.replace("plugin/jenkinswalldisplay/walldisplay.html", ""));
-var viewName = getParameterByName("viewName", "All");
-var theme = getParameterByName("theme", "default");
-var fontFamily = getParameterByName("fontFamily", "sans-serif");
-var buildRange = getParameterByName("buildRange", "all");
-var showDetails = false;
-var showBuildNumber = true;
-var showDisabledBuilds = true;
-var maxQueuePositionToShow = 15;
-
-var isDebug = false;
-var debugString = getParameterByName("debug", null);
-if (debugString != null)
+function setApiInterval()
 {
-	isDebug  = true;
+	debug("timeOut: " + jenkinsTimeOut + "ms");
+	debug("update interval: " + jenkinsUpdateInterval + "ms");
+
+    var f = function() {
+		if (!updateRunning[viewName])
+		{
+			getJenkinsApi(jenkinsUrl);
+		}
+
+		if (!updateRunning["queue"])
+		{
+			getJenkinsQueue(jenkinsUrl);
+		}
+
+		if (!updateRunning["pluginconfiguration"])
+		{
+			getPluginConfiguration(jenkinsUrl);
+		}
+	};
+
+	jenkinsApiIntervalId = setInterval(f, jenkinsUpdateInterval);
 }
+
 
 //---------------------------------------------------------------------
 $.ajaxSetup({ cache: false });
-
-var jobPadding = 5;
-var jobMargin = 8;
-var jobBorderWidth = 0;
-var paintInterval = 1000;
-var jobInfoTimout = 5000;
-
-//---------------------------------------------------------------------
-var rows = 0;
-var columns = 0
-var jobIndex = 0;
-var jobsToDisplay = new Array();
-var serverTime = 0;
-var updateRunning = new Array();
-var updateError = null;
-var clientWidth;
-var clientHeight;
-var lastPluginVersion = null;
-var lastTheme = "default";
-var lastFontFamily = fontFamily;
-var paintRunning = false;
-
-//---------------------------------------------------------------------
-// themes
-//---------------------------------------------------------------------
-var themes = new Array();
-themes["default"] = new Array();
-themes["default"].backgroundColor = "#ffffff";
-themes["default"]["blue"] = "#008800";
-themes["default"]["blue_building"] = "#00C000";
-themes["default"]["red"] = "#880000";
-themes["default"]["red_building"] = "#C00000";
-themes["default"]["yellow"] = "#888800";
-themes["default"]["yellow_building"] = "#C0C000";
-themes["default"]["aborted"] = "#ADADAD";
-themes["default"]["aborted_building"] = "#E8E6E6";
-themes["default"]["claimed_border"] = "#F5B800";
-
-
-themes["colorblind"] = new Array();
-themes["colorblind"].backgroundColor = "#ffffff";
-themes["colorblind"]["blue"] = "#0041C4";
-themes["colorblind"]["blue_building"] = "#BFD4FF";
-themes["colorblind"]["red"] = "#B30700";
-themes["colorblind"]["red_building"] = "#FF9180";
-themes["colorblind"]["yellow"] = "#B3B000";
-themes["colorblind"]["yellow_building"] = "#FFF780";
-themes["colorblind"]["aborted"] = "#777777";
-themes["colorblind"]["aborted_building"] = "#EEEEEE";
-themes["colorblind"]["claimed_border"] = "#F5B800";
-
-themes["dark"] = new Array();
-themes["dark"].backgroundColor = "#000000";
-themes["dark"]["blue"] = "#008800";
-themes["dark"]["blue_building"] = "#00C000";
-themes["dark"]["red"] = "#880000";
-themes["dark"]["red_building"] = "#C00000";
-themes["dark"]["yellow"] = "#888800";
-themes["dark"]["yellow_building"] = "#C0C000";
-themes["dark"]["aborted"] = "#ADADAD";
-themes["dark"]["aborted_building"] = "#E8E6E6";
-themes["dark"]["claimed_border"] = "#F5B800";
-
-themes["christmas"] = new Array();
-themes["christmas"].backgroundColor = "#000000";
-themes["christmas"]["blue"] = "#008800";
-themes["christmas"]["blue_building"] = "#00C000";
-themes["christmas"]["red"] = "#880000";
-themes["christmas"]["red_building"] = "#C00000";
-themes["christmas"]["yellow"] = "#888800";
-themes["christmas"]["yellow_building"] = "#C0C000";
-themes["christmas"]["aborted"] = "#ADADAD";
-themes["christmas"]["aborted_building"] = "#E8E6E6";
-themes["christmas"]["claimed_border"] = "#F5B800";
-themes["christmas"].start = function() {
-	$(document).snowfall('clear');
-	$(document).snowfall({round : true, minSize: 8, maxSize: 12 }); // add rounded
-}
-themes["christmas"].stop = function() {
-	$(document).snowfall('clear');
-}
-
-themes["boss"] = new Array();
-themes["boss"].backgroundColor = "#ffffff";
-themes["boss"]["blue"] = "#008800";
-themes["boss"]["blue_building"] = "#00C000";
-themes["boss"]["red"] = "#008800";
-themes["boss"]["red_building"] = "#00C000";
-themes["boss"]["yellow"] = "#008800";
-themes["boss"]["yellow_building"] = "#00C000";
-themes["boss"]["aborted"] = "#ADADAD";
-themes["boss"]["aborted_building"] = "#E8E6E6";
 
 
 $(document).ready(function() {
@@ -868,40 +908,11 @@ $(document).ready(function() {
 			paintRunning = false;
 		}
 
-	}, paintInterval);;
+	}, paintInterval);
 
 });
 
 window.onresize = function(event) {
 	updateWindowSizes();
-}
-
-function clearApiInterval()
-{
-clearInterval(jenkinsApiIntervalId);
-}
-
-function setApiInterval()
-{
-	debug("timeOut: " + jenkinsTimeOut + "ms");
-	debug("update interval: " + jenkinsUpdateInterval + "ms");
-
-	jenkinsApiIntervalId = setInterval(function() {
-		if (!updateRunning[viewName])
-		{
-			getJenkinsApi(jenkinsUrl);
-		}
-
-		if (!updateRunning["queue"])
-		{
-			getJenkinsQueue(jenkinsUrl);
-		}
-
-		if (!updateRunning["pluginconfiguration"])
-		{
-			getPluginConfiguration(jenkinsUrl);
-		}
-
-	}, jenkinsUpdateInterval);
-}
+};
 
